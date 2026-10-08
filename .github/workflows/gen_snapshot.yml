@@ -1,0 +1,279 @@
+name: gen_snapshot
+
+# A tag named after a Flutter version (e.g. `3.47.0`) builds the iOS arm64
+# gen_snapshot of that version's engine for every host and mode, proves each
+# one byte-identical to Flutter's official macOS compiler, and publishes the
+# GitHub release of that tag (docs/CONTRACT.md). workflow_dispatch does the
+# same without publishing.
+
+on:
+  push:
+    branches: [main]
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      flutter:
+        description: Flutter version to build and verify (no release is published)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gen-snapshot-${{ github.ref_type == 'tag' && github.ref_name || inputs.flutter || github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  DART_VERSION: '3.13.5'
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.resolve.outputs.build }}
+      flutter: ${{ steps.resolve.outputs.flutter }}
+      engine: ${{ steps.resolve.outputs.engine }}
+      dart: ${{ steps.resolve.outputs.dart }}
+      deps_key: ${{ steps.resolve.outputs.deps_key }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ env.DART_VERSION }}
+      - name: Test the build tooling
+        run: |
+          dart pub get
+          dart format --output=none --set-exit-if-changed lib bin test
+          dart analyze --fatal-infos
+          dart test
+      - name: Resolve the Flutter version
+        id: resolve
+        env:
+          FLUTTER_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.flutter }}
+        run: |
+          if [ -z "$FLUTTER_VERSION" ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "build=true" >> "$GITHUB_OUTPUT"
+          dart run xcross_gen_snapshot:resolve --flutter "$FLUTTER_VERSION" \
+            --github-output "$GITHUB_OUTPUT" | tee resolve.json
+
+  reference:
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      FLUTTER_VERSION: ${{ needs.resolve.outputs.flutter }}
+      ENGINE: ${{ needs.resolve.outputs.engine }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ env.DART_VERSION }}
+      - run: dart pub get
+      - name: Install Flutter ${{ env.FLUTTER_VERSION }}
+        run: |
+          for i in 1 2 3; do
+            git clone --depth 1 -b "$FLUTTER_VERSION" \
+              https://github.com/flutter/flutter "$RUNNER_TEMP/flutter" && break
+            rm -rf "$RUNNER_TEMP/flutter"; sleep 20
+          done
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+          actual=$(cat "$RUNNER_TEMP/flutter/bin/internal/engine.version")
+          if [ "$actual" != "$ENGINE" ]; then
+            echo "::error::engine.version is $actual, expected $ENGINE"; exit 1
+          fi
+      - name: Precache iOS artifacts
+        run: |
+          flutter config --no-analytics
+          flutter --version
+          for i in 1 2 3; do flutter precache --ios && break; sleep 20; done
+      - name: Build the reference app
+        run: |
+          cd "$RUNNER_TEMP"
+          flutter create --no-pub ref_app
+          cd ref_app
+          for mode in release profile; do
+            flutter build ios --$mode --no-codesign -v > "$RUNNER_TEMP/build-$mode.log" 2>&1 \
+              || { tail -100 "$RUNNER_TEMP/build-$mode.log"; exit 1; }
+            # Take the dill and compiler flutter actually used, and recompile it
+            # with the official compiler using fixed relative output names.
+            (cd "$GITHUB_WORKSPACE" && dart run xcross_gen_snapshot:verify \
+              --flutter-log "$RUNNER_TEMP/build-$mode.log" \
+              --copy-dill "$GITHUB_WORKSPACE/reference/$mode/app.dill" \
+              --work "$RUNNER_TEMP/verify-$mode" \
+              --json "$GITHUB_WORKSPACE/reference/$mode/official.json")
+            cp "$RUNNER_TEMP/build-$mode.log" "$GITHUB_WORKSPACE/reference/$mode/"
+          done
+          cat "$GITHUB_WORKSPACE"/reference/*/official.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reference
+          path: reference/
+          retention-days: 30
+
+  build:
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [linux-x64, linux-arm64, windows-x64, windows-arm64]
+        mode: [release, profile]
+        include:
+          - {host: linux-x64, runner: ubuntu-24.04}
+          - {host: linux-arm64, runner: ubuntu-24.04-arm}
+          - {host: windows-x64, runner: windows-2022}
+          - {host: windows-arm64, runner: windows-11-arm}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+    env:
+      FLUTTER_VERSION: ${{ needs.resolve.outputs.flutter }}
+      WORK: ${{ runner.temp }}/xgs
+      CACHE: ${{ runner.temp }}/xgs-cache
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ env.DART_VERSION }}
+      - run: dart pub get
+      - name: Restore downloads
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/xgs-cache
+          key: xgs-${{ matrix.host }}-${{ needs.resolve.outputs.deps_key }}
+      - name: Build gen_snapshot
+        run: |
+          dart run xcross_gen_snapshot:build \
+            --engine "${{ needs.resolve.outputs.engine }}" \
+            --dart "${{ needs.resolve.outputs.dart }}" \
+            --mode "${{ matrix.mode }}" \
+            --work "$WORK" --cache "$CACHE" --out out
+          cat out/build.json
+      - name: Package
+        run: dart run xcross_gen_snapshot:pack --dir out --mode "${{ matrix.mode }}" --out-dir dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gen_snapshot-${{ matrix.mode }}-${{ matrix.host }}
+          path: dist/gen_snapshot-${{ matrix.mode }}-${{ matrix.host }}.zip
+          retention-days: 30
+          compression-level: 0
+
+  verify:
+    needs: [resolve, reference, build]
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [linux-x64, linux-arm64, windows-x64, windows-arm64]
+        mode: [release, profile]
+        include:
+          - {host: linux-x64, runner: ubuntu-24.04}
+          - {host: linux-arm64, runner: ubuntu-24.04-arm}
+          - {host: windows-x64, runner: windows-2022}
+          - {host: windows-arm64, runner: windows-11-arm}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ env.DART_VERSION }}
+      - run: dart pub get
+      - uses: actions/download-artifact@v4
+        with:
+          name: reference
+          path: reference
+      - uses: actions/download-artifact@v4
+        with:
+          name: gen_snapshot-${{ matrix.mode }}-${{ matrix.host }}
+          path: dist
+      - name: Verify byte identity with the official compiler
+        run: |
+          dart run xcross_gen_snapshot:verify \
+            --compiler-zip "dist/gen_snapshot-${{ matrix.mode }}-${{ matrix.host }}.zip" \
+            --dill reference/${{ matrix.mode }}/app.dill \
+            --work "$RUNNER_TEMP/verify" \
+            --json "verification-${{ matrix.mode }}-${{ matrix.host }}.json" \
+            --expect-json reference/${{ matrix.mode }}/official.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verification-${{ matrix.mode }}-${{ matrix.host }}
+          path: verification-${{ matrix.mode }}-${{ matrix.host }}.json
+          if-no-files-found: ignore
+
+  publish:
+    needs: [resolve, verify]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+      FLUTTER_VERSION: ${{ needs.resolve.outputs.flutter }}
+      ENGINE: ${{ needs.resolve.outputs.engine }}
+      DART_REV: ${{ needs.resolve.outputs.dart }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ env.DART_VERSION }}
+      - run: dart pub get
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Write manifest.json
+        run: |
+          mkdir -p dist
+          cp artifacts/gen_snapshot-*/gen_snapshot-*.zip dist/
+          ls -la dist
+          release=$(jq -r .app_sha256 artifacts/reference/release/official.json)
+          profile=$(jq -r .app_sha256 artifacts/reference/profile/official.json)
+          # Every host build reproduced these (the verify jobs enforce it;
+          # double-check before publishing).
+          for mode in release profile; do
+            want=$(jq -r .app_sha256 artifacts/reference/$mode/official.json)
+            for host in linux-x64 linux-arm64 windows-x64 windows-arm64; do
+              got=$(jq -r .app_sha256 artifacts/verification-$mode-$host/verification-$mode-$host.json)
+              echo "$mode $host official=$want built=$got"
+              [ "$got" = "$want" ] || { echo "::error::$mode $host is not byte-identical"; exit 1; }
+            done
+          done
+          dart run xcross_gen_snapshot:manifest \
+            --flutter "$FLUTTER_VERSION" --engine "$ENGINE" --dart "$DART_REV" \
+            --assets dist --release-app-sha256 "$release" --profile-app-sha256 "$profile" \
+            --out dist/manifest.json
+      - name: Publish the release
+        run: |
+          set -euo pipefail
+          title="Flutter $FLUTTER_VERSION (engine ${ENGINE:0:8})"
+          notes="iOS arm64 gen_snapshot of Flutter $FLUTTER_VERSION (engine $ENGINE, Dart $DART_REV) for linux-x64, linux-arm64, windows-x64 and windows-arm64, release and profile. Every compiler produced an App binary byte-identical to Flutter's official macOS compiler on the default \`flutter create\` app (sha256 in manifest.json)."
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep $((i * 10)); done; return 1; }
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            if retry gh release download "$TAG" -p manifest.json -O published.json --clobber \
+               && cmp -s published.json dist/manifest.json; then
+              echo "Release $TAG already has this exact manifest, nothing to do."
+              exit 0
+            fi
+            echo "Updating release $TAG"
+            retry gh release edit "$TAG" --title "$title" --notes "$notes"
+            retry gh release upload "$TAG" dist/gen_snapshot-*.zip --clobber
+            retry gh release upload "$TAG" dist/manifest.json --clobber
+          else
+            retry gh release create "$TAG" --verify-tag --draft --title "$title" --notes "$notes" \
+              dist/gen_snapshot-*.zip
+            retry gh release upload "$TAG" dist/manifest.json --clobber
+            retry gh release edit "$TAG" --draft=false
+          fi
+          gh release view "$TAG"

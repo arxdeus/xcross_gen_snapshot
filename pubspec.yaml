@@ -1,0 +1,27 @@
+name: xcross_gen_snapshot
+description: >-
+  Builds the Flutter iOS arm64 AOT compiler (gen_snapshot) for Linux and
+  Windows hosts from the Dart SDK revision pinned by a Flutter engine.
+publish_to: none
+repository: https://github.com/arxdeus/xcross_gen_snapshot
+
+environment:
+  sdk: ^3.10.0
+
+executables:
+  build:
+  verify:
+  resolve:
+  manifest:
+  pack:
+
+dependencies:
+  archive: ^4.0.0
+  args: ^2.5.0
+  crypto: ^3.0.3
+  http: ^1.2.0
+  path: ^1.9.0
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0

@@ -1,0 +1,4 @@
+# The patches are applied byte-for-byte and hashed into manifest.json, so they
+# must never be converted to CRLF on Windows checkouts.
+*.patch -text
+* text=auto eol=lf

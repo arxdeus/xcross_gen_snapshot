@@ -1,0 +1,17 @@
+diff --git a/build/vs_toolchain.py b/build/vs_toolchain.py
+index ee033b3..6dfdc07 100644
+--- a/build/vs_toolchain.py
++++ b/build/vs_toolchain.py
+@@ -270,6 +270,12 @@ def _CopyRuntimeImpl(target, source, verbose=True):
+   some reason the values tend to differ by ~1e-07 despite being copies of the
+   same file... https://crbug.com/603603).
+   """
++  # xcross_gen_snapshot: gen_snapshot links the CRT statically (/MT) and does
++  # not need these DLLs. Skip ones this Visual Studio does not have at the
++  # expected place (e.g. Microsoft.VC143.CRT under a VS 2026 VC145 redist).
++  if not os.path.exists(source):
++    print('Skipping missing %s' % source)
++    return
+   if (os.path.isdir(os.path.dirname(target)) and
+       (not os.path.isfile(target) or
+        abs(os.stat(target).st_mtime - os.stat(source).st_mtime) >= 0.01)):
