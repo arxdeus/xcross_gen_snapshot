@@ -11,47 +11,14 @@ jobs:
     steps:
       - shell: pwsh
         run: |
-          $PSVersionTable.PSVersion
-          [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
-          Get-Command python, python3, py, git -ErrorAction SilentlyContinue | Format-Table -AutoSize
-          python -c "import platform,sys; print(sys.version, platform.machine())"
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          & $vswhere -all -products '*' -format json | Select-String -Pattern '"installationPath"|"displayName"|"installationVersion"'
-          $vs = & $vswhere -latest -products '*' -property installationPath
-          Write-Host "VS: $vs"
-          Get-ChildItem "$vs\VC\Tools\MSVC" | Format-Table Name
-          $msvc = (Get-ChildItem "$vs\VC\Tools\MSVC" | Select-Object -Last 1).FullName
-          Get-ChildItem "$msvc\bin" -Recurse -Depth 1 -Directory | Format-Table FullName
-          Get-ChildItem "$msvc\lib" -Directory | Format-Table Name
-          Get-ChildItem "$vs\VC\Redist\MSVC" -ErrorAction SilentlyContinue | Format-Table Name
-          $redist = (Get-ChildItem "$vs\VC\Redist\MSVC" -Directory | Where-Object Name -match '^\d' | Select-Object -Last 1).FullName
-          Get-ChildItem $redist -ErrorAction SilentlyContinue | Format-Table Name
-          Test-Path "$vs\DIA SDK\bin\amd64\msdia140.dll"
-          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include" | Format-Table Name
-          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Lib" | Format-Table Name
-          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers" -ErrorAction SilentlyContinue | Format-Table Name
-          foreach ($c in 'x64','arm64') { Write-Host "$c dbghelp: $(Test-Path "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\$c\dbghelp.dll")" }
-          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Lib\10.0.26100.0\um" -ErrorAction SilentlyContinue | Format-Table Name
-          git config --system --list
-          Get-PSDrive C,D -ErrorAction SilentlyContinue
-          (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
-      - uses: dart-lang/setup-dart@v1
-      - shell: bash
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products '*' -property installationPath
+          Get-ChildItem "$vs\VC\Redist\MSVC" -Directory | ForEach-Object { Write-Host "== $($_.FullName)"; Get-ChildItem "$($_.FullName)\arm64","$($_.FullName)\x64" -Directory -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "   $($_.FullName)" } }
+          Write-Host "PROCESSOR_ARCHITECTURE=$env:PROCESSOR_ARCHITECTURE"
+      - shell: cmd
         run: |
-          dart --version
-          dart -e 2>/dev/null || true
-          cat > /tmp/abi.dart <<'D'
-          import 'dart:ffi';
-          void main() => print(Abi.current());
-          D
-          dart run /tmp/abi.dart
-          nproc || true
-  mac:
-    runs-on: macos-15
-    steps:
-      - run: |
-          uname -m; sysctl -n hw.ncpu
-          xcodebuild -version
-          ls /Applications | grep -i xcode
-          xcrun --sdk iphoneos --show-sdk-version || true
-          df -h /
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do set VS=%%i
+          echo VS=%VS%
+          for %%a in (amd64 amd64_arm64 arm64 arm64_amd64) do (
+            echo ===== %%a
+            cmd /c ""%VS%\VC\Auxiliary\Build\vcvarsall.bat" %%a 10.0.26100.0 >NUL && where cl.exe && echo INCLUDE=%%INCLUDE%% && echo LIB=%%LIB%%"
+          )
