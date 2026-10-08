@@ -1,4 +1,4 @@
-# xcross_gen_snapshot: build recipe and contract (coordinator notes, verified)
+# xcross_gen_snapshot: build recipe (verified)
 
 ## Verified facts
 - Flutter 3.47.* tags -> engine, Dart revision (from flutter/flutter bin/internal/engine.version and DEPS `dart_revision`):
@@ -65,7 +65,13 @@ dart_xcross_target_os_ios = true
   - gn: gn/gn/{linux-amd64,linux-arm64,windows-amd64} @ gn_version (no windows-arm64 package: use windows-amd64 under emulation).
   - ninja: infra/3pp/tools/ninja/<platform> @ ninja_tag.
   - sysroot (Linux): fuchsia/third_party/sysroot/linux @ DEPS version -> buildtools/sysroot/linux (+ .versions/sysroot.cipd_version JSON).
-- Windows: Dart GN uses clang-cl from `clang_base_path` (default //buildtools/win-x64/clang) plus MSVC/Windows SDK through build/toolchain/win/setup_toolchain.py (vcvarsall; pinned SDK_VERSION 10.0.26100.0; env DEPOT_TOOLS_WIN_TOOLCHAIN=0; GYP_MSVS_OVERRIDE_PATH=<VS install>). Not yet built in practice. windows-arm64 needs vcvarsall arm64 host handling (setup_toolchain.py hardcodes `amd64[_<cpu>]`; on an arm64 host `arm64` native is the right arg). Expect to patch setup_toolchain.py minimally.
+- Windows (implemented in lib/src/build.dart, verified in CI on windows-2022 and windows-11-arm):
+  - Toolchain: clang-cl/lld-link from CIPD `fuchsia/third_party/clang/windows-amd64` at `buildtools/win-x64/clang` (GN's default `clang_base_path`, also on arm64 hosts where it runs under x64 emulation; there is no windows-arm64 clang package). gn: `gn/gn/windows-amd64` (no arm64 package; emulated). ninja: `infra/3pp/tools/ninja/windows-<amd64|arm64>` (native).
+  - Headers/libs from the installed Visual Studio + Windows SDK 10.0.26100.0 via `build/toolchain/win/setup_toolchain.py` (vcvarsall). Env: `DEPOT_TOOLS_WIN_TOOLCHAIN=0`, `GYP_MSVS_OVERRIDE_PATH=<vswhere -latest installationPath>`, `vs2022_install=<same>` (vs_toolchain.py only knows VS 2017-2022 by year; windows-11-arm ships VS 2026 at `...\Microsoft Visual Studio\18\Enterprise`).
+  - `target_cpu == host_cpu` on both hosts, so setup_toolchain.py runs vcvarsall with `amd64` (x64) or `amd64_arm64` (arm64: x64-hosted MSVC tools targeting arm64). Both exist on the runners and only INCLUDE/LIB/PATH are used (the compiler is clang-cl), so no change to setup_toolchain.py was needed.
+  - `patches/windows_host.patch` (1 hunk, build/vs_toolchain.py): `copy_dlls` (run by GN for the default toolchain) copies the VC++ runtime DLLs and on arm64 looks for `Microsoft.VC143.CRT`, which VS 2026 only ships as `VC145`. gen_snapshot links the CRT statically (`/MT`), so missing runtime DLLs are skipped instead of failing `gn gen`.
+  - The Dart checkout is done with `core.autocrlf=false` (Windows runners default to true): sources hashed into the snapshot version (tools/make_version.py) must keep LF bytes.
+  - Short work dir (`C:/xgs`) to stay under MAX_PATH.
 
 ## Reference outputs for CI byte checks
 - Build a reference Flutter app with stock `flutter build ios --release` / `--profile` on macOS for the same Flutter version (macOS runner), take its `.dart_tool/flutter_build/*/app.dill` and run the OFFICIAL engine gen_snapshot (from that engine's ios-release/ios-profile artifacts) with the flags below, then run each host's built compiler on the same app.dill and compare App byte-for-byte:
