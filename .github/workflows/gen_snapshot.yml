@@ -149,11 +149,14 @@ jobs:
           key: xgs-${{ matrix.host }}-${{ needs.resolve.outputs.deps_key }}
       - name: Build gen_snapshot
         run: |
+          # Short work dir on Windows: object paths under the Dart tree get
+          # close to MAX_PATH otherwise.
+          work=xgs; [ "$RUNNER_OS" = Windows ] && work=C:/xgs
           dart run xcross_gen_snapshot:build \
             --engine "${{ needs.resolve.outputs.engine }}" \
             --dart "${{ needs.resolve.outputs.dart }}" \
             --mode "${{ matrix.mode }}" \
-            --work xgs --cache xgs-cache --out out
+            --work "$work" --cache xgs-cache --out out
           cat out/build.json
       - name: Package
         run: dart run xcross_gen_snapshot:pack --dir out --mode "${{ matrix.mode }}" --out-dir dist

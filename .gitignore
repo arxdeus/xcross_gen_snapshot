@@ -1,3 +1,6 @@
 /work/
 /out/
+/xgs/
+/xgs-cache/
+/dist/
 .dart_tool/
