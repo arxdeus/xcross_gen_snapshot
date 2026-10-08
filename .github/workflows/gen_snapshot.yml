@@ -212,6 +212,15 @@ jobs:
           name: verification-${{ matrix.mode }}-${{ matrix.host }}
           path: verification-${{ matrix.mode }}-${{ matrix.host }}.json
           if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: mismatch-${{ matrix.mode }}-${{ matrix.host }}
+          path: |
+            ${{ runner.temp }}/verify/App
+            ${{ runner.temp }}/verify/app.o
+          if-no-files-found: ignore
+          retention-days: 7
 
   publish:
     needs: [resolve, verify]
