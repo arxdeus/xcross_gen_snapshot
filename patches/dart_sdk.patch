@@ -380,6 +380,25 @@ index 47343aa7..e7e3d21b 100644
      branch->InheritDeoptTarget(zone(), call_);
  
      auto true_target = BranchSimplifier::ToTargetEntry(zone(), callee_entry);
+diff --git a/runtime/vm/compiler/frontend/kernel_binary_flowgraph.cc b/runtime/vm/compiler/frontend/kernel_binary_flowgraph.cc
+index f77c8984..59070da5 100644
+--- a/runtime/vm/compiler/frontend/kernel_binary_flowgraph.cc
++++ b/runtime/vm/compiler/frontend/kernel_binary_flowgraph.cc
+@@ -866,10 +866,11 @@ FlowGraph* StreamingFlowGraphBuilder::BuildGraphOfFunction(
+ 
+   // The RawParameter variables should be set to null to avoid retaining more
+   // objects than necessary during GC.
+-  const Fragment body =
+-      ClearRawParameters(dart_function) +
+-      InitSuspendableFunction(dart_function, emitted_value_type) +
++  Fragment body_fragment = ClearRawParameters(dart_function);
++  body_fragment += InitSuspendableFunction(dart_function, emitted_value_type);
++  body_fragment +=
+       BuildFunctionBody(dart_function, first_parameter, is_constructor);
++  const Fragment body = body_fragment;
+ 
+   auto extra_entry_point_style =
+       ChooseEntryPointStyle(dart_function, implicit_type_checks,
 diff --git a/runtime/vm/compiler/frontend/kernel_to_il.cc b/runtime/vm/compiler/frontend/kernel_to_il.cc
 index aa391285..6f6e2d55 100644
 --- a/runtime/vm/compiler/frontend/kernel_to_il.cc
