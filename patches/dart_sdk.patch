@@ -359,3 +359,41 @@ index d465b34f..ea4979e7 100644
    # Instead of using is_debug, we introduce a different flag for specifying a
    # Debug build of Dart so that clients can still use a Release build of Dart
    # while themselves doing a Debug build.
+diff --git a/runtime/vm/compiler/frontend/flow_graph_builder.cc b/runtime/vm/compiler/frontend/flow_graph_builder.cc
+index 47343aa7..e7e3d21b 100644
+--- a/runtime/vm/compiler/frontend/flow_graph_builder.cc
++++ b/runtime/vm/compiler/frontend/flow_graph_builder.cc
+@@ -263,12 +263,14 @@ void InlineExitCollector::ReplaceCall(BlockEntryInstr* callee_entry) {
+     call_block->ReplaceAsPredecessorWith(false_block);
+ 
+     ConstantInstr* true_const = caller_graph_->GetConstant(Bool::True());
++    const intptr_t compare_deopt_id = CompilerState::Current().GetNextDeoptId();
++    const intptr_t branch_deopt_id = CompilerState::Current().GetNextDeoptId();
+     BranchInstr* branch = new (Z) BranchInstr(
+         new (Z) StrictCompareInstr(InstructionSource(), Token::kEQ_STRICT,
+                                    new (Z) Value(true_const),
+                                    new (Z) Value(true_const), false,
+-                                   CompilerState::Current().GetNextDeoptId()),
+-        CompilerState::Current().GetNextDeoptId());  // No number check.
++                                   compare_deopt_id),
++        branch_deopt_id);  // No number check.
+     branch->InheritDeoptTarget(zone(), call_);
+ 
+     auto true_target = BranchSimplifier::ToTargetEntry(zone(), callee_entry);
+diff --git a/runtime/vm/compiler/frontend/kernel_to_il.cc b/runtime/vm/compiler/frontend/kernel_to_il.cc
+index aa391285..6f6e2d55 100644
+--- a/runtime/vm/compiler/frontend/kernel_to_il.cc
++++ b/runtime/vm/compiler/frontend/kernel_to_il.cc
+@@ -4896,9 +4896,11 @@ Fragment FlowGraphBuilder::Suspend(TokenPosition position,
+   Value* type_args =
+       (stub_id == SuspendInstr::StubId::kAwaitWithTypeCheck) ? Pop() : nullptr;
+   Value* operand = Pop();
++  const intptr_t deopt_id = GetNextDeoptId();
++  const intptr_t resume_deopt_id = GetNextDeoptId();
+   SuspendInstr* instr =
+       new (Z) SuspendInstr(InstructionSource(position), stub_id, operand,
+-                           type_args, GetNextDeoptId(), GetNextDeoptId());
++                           type_args, deopt_id, resume_deopt_id);
+   Push(instr);
+   return Fragment(instr);
+ }
