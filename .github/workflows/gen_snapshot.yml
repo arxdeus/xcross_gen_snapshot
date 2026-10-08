@@ -136,8 +136,6 @@ jobs:
         shell: bash
     env:
       FLUTTER_VERSION: ${{ needs.resolve.outputs.flutter }}
-      WORK: ${{ runner.temp }}/xgs
-      CACHE: ${{ runner.temp }}/xgs-cache
     steps:
       - uses: actions/checkout@v4
       - uses: dart-lang/setup-dart@v1
@@ -147,7 +145,7 @@ jobs:
       - name: Restore downloads
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/xgs-cache
+          path: xgs-cache
           key: xgs-${{ matrix.host }}-${{ needs.resolve.outputs.deps_key }}
       - name: Build gen_snapshot
         run: |
@@ -155,7 +153,7 @@ jobs:
             --engine "${{ needs.resolve.outputs.engine }}" \
             --dart "${{ needs.resolve.outputs.dart }}" \
             --mode "${{ matrix.mode }}" \
-            --work "$WORK" --cache "$CACHE" --out out
+            --work xgs --cache xgs-cache --out out
           cat out/build.json
       - name: Package
         run: dart run xcross_gen_snapshot:pack --dir out --mode "${{ matrix.mode }}" --out-dir dist
