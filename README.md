@@ -27,9 +27,19 @@ The workflow then:
 2. on `macos-15`, installs that Flutter, builds the default `flutter create` app with `flutter build ios --release` and `--profile`, and recompiles the exact `app.dill` with Flutter's official `ios-release`/`ios-profile` `gen_snapshot_arm64` (flags taken from and checked against the `flutter build -v` log, outputs named `App`/`app.o`),
 3. builds the compiler on all four hosts in both modes (the recipe below),
 4. runs every built compiler on the same `app.dill` with the same flags on its own host and requires the `App` sha256 to equal the official one,
-5. only then publishes the release with the 8 zips and `manifest.json`. Re-running a tag whose release already carries the identical manifest is a no-op.
+5. only then publishes the release with the 8 zips and `manifest.json`, after checking that every verify job ran exactly the executable of the zip being published, and attaches a build provenance attestation to each zip and to `manifest.json` (`gh attestation verify <file> -R arxdeus/xcross_gen_snapshot`).
 
-To build and verify without publishing, run the workflow manually (Actions, `gen_snapshot`, "Run workflow") with a Flutter version.
+Publishing builds download the DEPS-pinned git deps fresh from googlesource (they do not trust the Actions cache for them); the download cache is only written by manual runs on main.
+
+### Re-running and overwriting
+
+- Re-running a tag whose release already carries the identical `manifest.json` is a no-op (the assets are checked against it).
+- If a previous run stopped half way and left a draft release, re-running the tag finishes it: missing or different assets are uploaded, `manifest.json` last, and the release is published.
+- A release that is already published with a different `manifest.json` is never replaced by a tag run: the publish job fails. To overwrite it on purpose, run the workflow manually on main with `flutter=<tag>` and `replace_release=true`. That uploads the zips first and `manifest.json` last, so for a few seconds the published zips may not match the published manifest; xcross verifies every download against the manifest and fails closed in that window.
+
+To build and verify without publishing, run the workflow manually (Actions, `gen_snapshot`, "Run workflow") with a Flutter version, or `gh workflow run gen_snapshot.yml --ref main -f flutter=3.47.6`.
+
+Each build records its runner image in `build.json` (in the build artifact), and on Windows the Visual Studio instance, MSVC tools and Windows SDK versions; the macOS reference records its runner image, macOS and Xcode versions in `official.json`, so toolchain drift between releases is visible.
 
 ## Tooling
 

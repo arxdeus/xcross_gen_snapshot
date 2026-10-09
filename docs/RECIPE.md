@@ -18,13 +18,14 @@
   - Linux arm64 host, release: App identical; app.o differs only in DWARF DW_AT_producer string naming the host.
   - Linux x64 host (cross-compiled, run under emulation), release: App identical.
 - IMPORTANT for any comparison: gen_snapshot embeds the `--macho-object` path as an N_OSO stab string in the unstripped App. Always run reference and candidate with the SAME relative output names (`--macho=App --macho-object=app.o` in their own directories) or the string table length differs.
-- Without the sort patch a glibc-hosted compiler produces a valid but different snapshot (3.3M bytes differ): libc qsort tie order. The patch ports Apple Libc stdlib/FreeBSD/qsort.c + heapsort.c (BSD-3) into runtime/platform/xcross_apple_sort.h and makes GrowableArray::Sort use it. The heapsort fallback is hit in 37,653 of 45,871 calls, so heapsort must be ported exactly.
+- Without the sort patch a glibc-hosted compiler produces a valid but different snapshot (3.3M bytes differ): libc qsort tie order. The reference is the libc `qsort` of the `macos-15` GitHub runner that runs Flutter's official compiler in CI (its image and macOS version are recorded in `official.json`). The patch ports Apple Libc stdlib/FreeBSD/qsort.c + heapsort.c (BSD-3, full notice in the header and in licenses/LICENSE.apple-libc-qsort) into runtime/platform/xcross_apple_sort.h and makes GrowableArray::Sort use it. The heapsort fallback is hit in 37,653 of 45,871 calls, so heapsort must be ported exactly. Element swaps go through `memcpy` into local `int64_t`/`int32_t`/`char` (no type-punned lvalues); the port matches the macOS libc `qsort` on randomized inputs (element sizes 1-40, misaligned bases, `-O0`/`-O2`).
 
 ## Patch
-`dart_sdk.patch` (4 files, applies with `git apply` to a sparse checkout at da6595cd):
+`dart_sdk.patch` (7 files, applies with `git apply` to a sparse checkout at the Dart revision of every Flutter 3.47.0-3.47.6):
 - runtime/runtime_args.gni: `dart_xcross_target_os_ios = false` declared arg.
 - runtime/BUILD.gn: `dart_os_config` emits DART_TARGET_OS_MACOS + DART_TARGET_OS_MACOS_IOS when the arg is true, while target_os stays the host OS (host toolchain builds gen_snapshot, no Xcode/iOS SDK lookup).
 - runtime/platform/xcross_apple_sort.h (new) + runtime/platform/growable_array.h (Sort uses it).
+- runtime/vm/compiler/frontend/kernel_to_il.cc, flow_graph_builder.cc, kernel_binary_flowgraph.cc: argument evaluation order made explicit (see "Windows: argument evaluation order" below).
 
 ## GN args
 Common (target_os = host OS: "linux" | "win"; target_cpu = host cpu: "x64" | "arm64"; host_cpu = same):
