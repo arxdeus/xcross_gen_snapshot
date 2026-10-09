@@ -33,6 +33,9 @@ when that changes.
   (`verify --compiler-zip --expect-json`, plus `--manifest <manifest.json>
   --flutter <version>` for published zips). Mismatching App/app.o land in
   `<results>/mismatch/<app>/`.
+- `.github/workflows/gen_snapshot.yml` builds the corpus with the official
+  toolchain in its `corpus` job and every `verify` job runs its freshly built
+  compiler on it, so nothing is published that differs on any corpus app.
 - `.github/workflows/verify_published.yml` (workflow_dispatch, input
   `flutter`): proves the published release of that Flutter version on the
   corpus without rebuilding anything.

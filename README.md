@@ -24,9 +24,9 @@ git tag 3.47.7 && git push origin 3.47.7
 The workflow then:
 
 1. resolves the engine (`bin/internal/engine.version`) and Dart revision (`DEPS` `dart_revision`) of that Flutter tag,
-2. on `macos-15`, installs that Flutter, builds the default `flutter create` app with `flutter build ios --release` and `--profile`, and recompiles the exact `app.dill` with Flutter's official `ios-release`/`ios-profile` `gen_snapshot_arm64` (flags taken from and checked against the `flutter build -v` log, outputs named `App`/`app.o`),
+2. on `macos-15`, installs that Flutter, builds the default `flutter create` app with `flutter build ios --release` and `--profile`, and recompiles the exact `app.dill` with Flutter's official `ios-release`/`ios-profile` `gen_snapshot_arm64` (flags taken from and checked against the `flutter build -v` log, outputs named `App`/`app.o`); a second `macos-15` job does the same for the corpus apps of [docs/CORPUS.md](docs/CORPUS.md),
 3. builds the compiler on all four hosts in both modes (the recipe below),
-4. runs every built compiler on the same `app.dill` with the same flags on its own host and requires the `App` sha256 to equal the official one,
+4. runs every built compiler on the same `app.dill` with the same flags on its own host and requires the `App` sha256 to equal the official one, for the default app and every corpus app,
 5. only then publishes the release with the 8 zips and `manifest.json`, after checking that every verify job ran exactly the executable of the zip being published, and attaches a build provenance attestation to each zip and to `manifest.json` (`gh attestation verify <file> -R arxdeus/xcross_gen_snapshot`).
 
 Publishing builds download the DEPS-pinned git deps fresh from googlesource (they do not trust the Actions cache for them); the download cache is only written by manual runs on main.
