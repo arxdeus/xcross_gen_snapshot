@@ -192,7 +192,7 @@ Future<SourceTree> prepareSource({
 
   // 3. Git deps from gitiles tarballs.
   for (final dep in pins.gitDeps) {
-    await _fetchGitDep(net, dep, sdk, cacheDir, trustCache: trustCachedGitDeps);
+    await fetchGitDep(net, dep, sdk, cacheDir, trustCache: trustCachedGitDeps);
   }
 
   // 4. Tools from CIPD.
@@ -279,7 +279,7 @@ Future<void> _checkoutDart(Directory sdk, String revision) async {
 /// its file name. With [trustCache] false (publishing builds) a cached
 /// tarball is ignored and the dependency is downloaded again from
 /// googlesource.
-Future<void> _fetchGitDep(
+Future<void> fetchGitDep(
   Net net,
   GitDep dep,
   Directory sdk,
