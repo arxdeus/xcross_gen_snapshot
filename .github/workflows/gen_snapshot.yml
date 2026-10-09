@@ -391,5 +391,5 @@ jobs:
           REPLACE: ${{ github.event_name == 'workflow_dispatch' && inputs.replace_release == true }}
         run: |
           export TITLE="Flutter $FLUTTER_VERSION (engine ${ENGINE:0:8})"
-          export NOTES="iOS arm64 gen_snapshot of Flutter $FLUTTER_VERSION (engine $ENGINE, Dart $DART_REV) for linux-x64, linux-arm64, windows-x64 and windows-arm64, release and profile. Every compiler produced an App binary byte-identical to Flutter's official macOS compiler on the default \`flutter create\` app (sha256 in manifest.json). Build provenance: \`gh attestation verify <file> -R $GITHUB_REPOSITORY\`."
+          export NOTES="iOS arm64 gen_snapshot of Flutter $FLUTTER_VERSION (engine $ENGINE, Dart $DART_REV) for linux-x64, linux-arm64, windows-x64 and windows-arm64, release and profile. Every compiler produced App binaries byte-identical to Flutter's official macOS compiler on the default \`flutter create\` app (sha256 in manifest.json) and on every corpus app of docs/CORPUS.md. Build provenance: \`gh attestation verify <file> -R $GITHUB_REPOSITORY\`."
           tool/publish_release.sh
