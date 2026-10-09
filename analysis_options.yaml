@@ -1,1 +1,7 @@
 include: package:lints/recommended.yaml
+
+analyzer:
+  exclude:
+    # Flutter apps, analyzed with `flutter analyze` inside a created app
+    # (see docs/CORPUS.md).
+    - corpus/**

@@ -5,6 +5,7 @@ library;
 export 'src/build.dart';
 export 'src/cipd.dart';
 export 'src/config.dart';
+export 'src/corpus.dart';
 export 'src/deps.dart';
 export 'src/io.dart';
 export 'src/manifest.dart';

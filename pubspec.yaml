@@ -10,6 +10,7 @@ environment:
 
 executables:
   build:
+  corpus:
   verify:
   resolve:
   manifest:

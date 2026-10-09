@@ -4,3 +4,7 @@
 /xgs-cache/
 /dist/
 .dart_tool/
+/.xgs-corpus-verify/
+/corpus-ref/
+/published/
+/results/
