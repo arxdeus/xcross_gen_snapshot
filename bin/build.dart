@@ -6,7 +6,7 @@ import 'package:xcross_gen_snapshot/xcross_gen_snapshot.dart';
 const usage =
     'dart run xcross_gen_snapshot:build '
     '(--flutter <version> | --engine <hash>) --mode release|profile '
-    '--out <dir> [--work <dir>] [--cache <dir>] [--jobs N]';
+    '--out <dir> [--work <dir>] [--cache <dir>] [--jobs N] [--fresh-git-deps]';
 
 Future<void> main(List<String> args) async {
   final parser = ArgParser()
@@ -26,6 +26,14 @@ Future<void> main(List<String> args) async {
       help: 'Download cache directory (default: <work>/cache)',
     )
     ..addOption('jobs', help: 'ninja -j value')
+    ..addFlag(
+      'fresh-git-deps',
+      negatable: false,
+      help:
+          'Download the gitiles tarballs of the git deps again even if '
+          '--cache has them (publishing builds: cached tarballs are only '
+          'known by file name)',
+    )
     ..addFlag('help', abbr: 'h', negatable: false);
   final ArgResults options;
   try {
@@ -66,5 +74,6 @@ Future<void> main(List<String> args) async {
     workDir: work,
     cacheDir: cache == null ? null : Directory(cache).absolute,
     jobs: jobs == null ? null : int.parse(jobs),
+    trustCachedGitDeps: !options.flag('fresh-git-deps'),
   );
 }

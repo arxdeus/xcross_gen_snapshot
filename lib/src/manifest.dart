@@ -218,3 +218,42 @@ Map<String, Object?> buildManifest({
 /// Canonical JSON text of a manifest (stable formatting for comparisons).
 String encodeManifest(Map<String, Object?> manifest) =>
     '${const JsonEncoder.withIndent('  ').convert(manifest)}\n';
+
+/// Checks, before publishing, that every compiler listed in [manifest] was
+/// the one verified: [verifications] maps an asset name to the result JSON
+/// of its verify job (`bin/verify.dart --json`). Each must have run exactly
+/// the executable the asset contains (`compiler_sha256 ==
+/// executable_sha256`) and produced the official App of its mode.
+void checkVerifications(
+  Map<String, Object?> manifest,
+  Map<String, Map<String, Object?>> verifications,
+) {
+  final assets = (manifest['assets'] as Map).cast<String, Object?>();
+  final verification = (manifest['verification'] as Map)
+      .cast<String, Object?>();
+  final missing = assets.keys.where((n) => !verifications.containsKey(n));
+  if (missing.isNotEmpty) {
+    throw StateError('no verification result for ${missing.join(', ')}');
+  }
+  for (final mode in BuildMode.values) {
+    for (final host in Host.values) {
+      final name = assetName(mode, host);
+      final asset = (assets[name] as Map).cast<String, Object?>();
+      final result = verifications[name]!;
+      final executable = asset['executable_sha256'];
+      if (result['compiler_sha256'] != executable) {
+        throw StateError(
+          '$name: verified compiler sha256 ${result['compiler_sha256']} is '
+          'not the published executable $executable',
+        );
+      }
+      final app = verification['${mode.name}_app_sha256'];
+      if (result['app_sha256'] != app) {
+        throw StateError(
+          '$name: App sha256 ${result['app_sha256']} is not the official '
+          '$app',
+        );
+      }
+    }
+  }
+}

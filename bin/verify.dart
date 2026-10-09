@@ -88,6 +88,9 @@ Future<void> main(List<String> args) async {
     'compiler_sha256': await sha256File(File(compiler)),
     'dill_sha256': await sha256File(File(dill)),
     ...result.toJson(),
+    // The macOS reference (official.json) and every host check record the
+    // runner image so drift between releases is visible.
+    'runner': await runnerIdentity(),
   };
   final jsonPath = options.option('json');
   if (jsonPath != null) {

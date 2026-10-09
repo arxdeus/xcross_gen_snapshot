@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/args.dart';
@@ -15,6 +16,14 @@ Future<void> main(List<String> args) async {
     ..addOption('patch', defaultsTo: 'patches/dart_sdk.patch')
     ..addOption('release-app-sha256', mandatory: true)
     ..addOption('profile-app-sha256', mandatory: true)
+    ..addOption(
+      'verifications',
+      help:
+          'Directory with the verify jobs\' artifacts '
+          '(verification-<mode>-<host>/verification-<mode>-<host>.json); '
+          'every one must have run the executable of its zip and produced '
+          'the official App',
+    )
     ..addOption('out', defaultsTo: 'manifest.json');
   final options = parser.parse(args);
   final dir = options.option('assets')!;
@@ -38,6 +47,27 @@ Future<void> main(List<String> args) async {
     releaseAppSha256: options.option('release-app-sha256')!.trim(),
     profileAppSha256: options.option('profile-app-sha256')!.trim(),
   );
+  final verificationDir = options.option('verifications');
+  if (verificationDir != null) {
+    final results = <String, Map<String, Object?>>{};
+    for (final mode in BuildMode.values) {
+      for (final host in Host.values) {
+        final id = 'verification-${mode.name}-${host.id}';
+        final file = File(p.join(verificationDir, id, '$id.json'));
+        if (!file.existsSync()) throw StateError('missing ${file.path}');
+        results[assetName(
+          mode,
+          host,
+        )] = (jsonDecode(file.readAsStringSync()) as Map)
+            .cast<String, Object?>();
+      }
+    }
+    checkVerifications(manifest, results);
+    stderr.writeln(
+      'every verified compiler is the executable of its zip and produced '
+      'the official App',
+    );
+  }
   File(options.option('out')!).writeAsStringSync(encodeManifest(manifest));
   stdout.write(encodeManifest(manifest));
 }

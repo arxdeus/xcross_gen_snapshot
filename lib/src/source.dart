@@ -153,6 +153,7 @@ Future<SourceTree> prepareSource({
   required String dartRevision,
   required Host host,
   required String python,
+  bool trustCachedGitDeps = true,
 }) async {
   final pkg = await packageRoot();
   final patches = [
@@ -191,7 +192,7 @@ Future<SourceTree> prepareSource({
 
   // 3. Git deps from gitiles tarballs.
   for (final dep in pins.gitDeps) {
-    await _fetchGitDep(net, dep, sdk, cacheDir);
+    await _fetchGitDep(net, dep, sdk, cacheDir, trustCache: trustCachedGitDeps);
   }
 
   // 4. Tools from CIPD.
@@ -272,16 +273,27 @@ Future<void> _checkoutDart(Directory sdk, String revision) async {
   }
 }
 
+/// Fetches the gitiles tarball of [dep] and extracts it into the tree.
+///
+/// gitiles tarballs are not byte-stable, so a cached one is only known by
+/// its file name. With [trustCache] false (publishing builds) a cached
+/// tarball is ignored and the dependency is downloaded again from
+/// googlesource.
 Future<void> _fetchGitDep(
   Net net,
   GitDep dep,
   Directory sdk,
-  Directory cacheDir,
-) async {
+  Directory cacheDir, {
+  required bool trustCache,
+}) async {
   final name = dep.path.replaceAll('/', '_');
   final tarball = File(
     p.join(cacheDir.path, 'git', '$name-${dep.revision}.tar.gz'),
   );
+  if (!trustCache && tarball.existsSync()) {
+    log('ignoring cached $dep (cached git deps are not trusted)');
+    tarball.deleteSync();
+  }
   if (!tarball.existsSync()) {
     log('downloading $dep');
     await net.download(dep.archiveUrl, tarball);

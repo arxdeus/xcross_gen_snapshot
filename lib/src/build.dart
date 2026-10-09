@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'config.dart';
 import 'io.dart';
 import 'resolve.dart';
+import 'runner.dart';
 import 'source.dart';
 
 /// Result of [buildGenSnapshot].
@@ -46,6 +47,7 @@ Future<BuildResult> buildGenSnapshot({
   Directory? cacheDir,
   int? jobs,
   String? python,
+  bool trustCachedGitDeps = true,
 }) async {
   final host = Host.current();
   python ??= Platform.isWindows ? 'python' : 'python3';
@@ -66,6 +68,7 @@ Future<BuildResult> buildGenSnapshot({
       dartRevision: release.dart,
       host: host,
       python: python,
+      trustCachedGitDeps: trustCachedGitDeps,
     );
 
     final outName = 'out/xgs_${mode.name}';
@@ -121,8 +124,18 @@ Future<BuildResult> buildGenSnapshot({
       mode: mode,
       host: host,
     );
+    final buildJson = {
+      ...result.toJson(),
+      'pins': tree.pins.describe(),
+      'runner': await runnerIdentity(),
+      if (host.isWindows)
+        'windows_toolchain': await windowsToolchainIdentity(
+          visualStudio: environment['GYP_MSVS_OVERRIDE_PATH']!,
+          outDir: outPath,
+        ),
+    };
     File(p.join(outDir.path, 'build.json')).writeAsStringSync(
-      '${const JsonEncoder.withIndent('  ').convert({...result.toJson(), 'pins': tree.pins.describe()})}\n',
+      '${const JsonEncoder.withIndent('  ').convert(buildJson)}\n',
     );
     log('built ${executable.path} (sha256 ${result.executableSha256})');
     return result;
@@ -155,13 +168,7 @@ Future<void> _copyLicenses(
 Future<Map<String, String>> _windowsToolchainEnvironment() async {
   var vs = Platform.environment['GYP_MSVS_OVERRIDE_PATH'];
   if (vs == null || vs.isEmpty) {
-    final vswhere = p.join(
-      Platform.environment['ProgramFiles(x86)'] ?? r'C:\Program Files (x86)',
-      'Microsoft Visual Studio',
-      'Installer',
-      'vswhere.exe',
-    );
-    vs = await capture(vswhere, [
+    vs = await capture(vswherePath(), [
       '-latest',
       '-products',
       '*',

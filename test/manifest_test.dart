@@ -109,6 +109,63 @@ void main() {
     expect(jsonDecode(encodeManifest(manifest)), manifest);
   });
 
+  test('verifications must cover every published executable', () {
+    final manifest = buildManifest(
+      release: release,
+      patchSha256: h('c'),
+      assets: {
+        for (final n in allAssetNames())
+          n: AssetInfo(sha256: h('a'), executableSha256: h('b'), size: 42),
+      },
+      releaseAppSha256: h('d'),
+      profileAppSha256: h('e'),
+    );
+    Map<String, Map<String, Object?>> results({
+      String compiler = 'b',
+      String? only,
+    }) => {
+      for (final mode in BuildMode.values)
+        for (final host in Host.values)
+          assetName(mode, host): {
+            'compiler_sha256': h(
+              only == null || only == assetName(mode, host) ? compiler : 'b',
+            ),
+            'app_sha256': h(mode == BuildMode.release ? 'd' : 'e'),
+          },
+    };
+    checkVerifications(manifest, results());
+    expect(
+      () => checkVerifications(
+        manifest,
+        results(compiler: 'f', only: 'gen_snapshot-profile-windows-arm64.zip'),
+      ),
+      throwsStateError,
+    );
+    final wrongApp = results();
+    wrongApp['gen_snapshot-release-linux-x64.zip']!['app_sha256'] = h('e');
+    expect(() => checkVerifications(manifest, wrongApp), throwsStateError);
+    final missing = results()..remove('gen_snapshot-release-linux-arm64.zip');
+    expect(() => checkVerifications(manifest, missing), throwsStateError);
+  });
+
+  test('windows toolchain versions from an environment block', () {
+    final block = [
+      r'INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35207\include;'
+          r'C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt',
+      r'LIB=C:\Program Files (x86)\Windows Kits\10\lib\10.0.26100.0\ucrt\x64',
+      r'PATH=C:\Windows',
+      '',
+    ].join('\u0000');
+    expect(parseWindowsEnvironmentBlock(block), {
+      'msvc_tools_version': '14.44.35207',
+      'windows_sdk_version': '10.0.26100.0',
+    });
+    expect(parseWindowsEnvironmentBlock('PATH=x\u0000\u0000'), {
+      'msvc_tools_version': null,
+      'windows_sdk_version': null,
+    });
+  });
+
   test('manifest rejects incomplete asset sets', () {
     expect(
       () => buildManifest(

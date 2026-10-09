@@ -9,5 +9,6 @@ export 'src/deps.dart';
 export 'src/io.dart';
 export 'src/manifest.dart';
 export 'src/resolve.dart';
+export 'src/runner.dart';
 export 'src/source.dart';
 export 'src/verify.dart';
