@@ -184,4 +184,55 @@ void main() {
       throwsStateError,
     );
   });
+  test('a downloaded asset is checked against the published manifest', () {
+    final assets = {
+      for (final n in allAssetNames())
+        n: AssetInfo(sha256: h('a'), executableSha256: h('b'), size: 42),
+    };
+    final manifest =
+        jsonDecode(
+              encodeManifest(
+                buildManifest(
+                  release: release,
+                  patchSha256: h('c'),
+                  assets: assets,
+                  releaseAppSha256: h('d'),
+                  profileAppSha256: h('e'),
+                ),
+              ),
+            )
+            as Map<String, Object?>;
+    const name = 'gen_snapshot-profile-windows-arm64.zip';
+    final good = AssetInfo(sha256: h('a'), executableSha256: h('b'), size: 42);
+    checkAssetAgainstManifest(manifest, asset: name, info: good);
+    checkAssetAgainstManifest(
+      manifest,
+      asset: name,
+      info: good,
+      flutter: '3.47.0',
+    );
+    void rejects(AssetInfo info, {String asset = name, String? flutter}) =>
+        expect(
+          () => checkAssetAgainstManifest(
+            manifest,
+            asset: asset,
+            info: info,
+            flutter: flutter,
+          ),
+          throwsStateError,
+        );
+    rejects(AssetInfo(sha256: h('f'), executableSha256: h('b'), size: 42));
+    rejects(AssetInfo(sha256: h('a'), executableSha256: h('f'), size: 42));
+    rejects(AssetInfo(sha256: h('a'), executableSha256: h('b'), size: 43));
+    rejects(good, asset: 'gen_snapshot-debug-linux-x64.zip');
+    rejects(good, flutter: '3.47.1');
+    expect(
+      () => checkAssetAgainstManifest(
+        {...manifest, 'schema': 2},
+        asset: name,
+        info: good,
+      ),
+      throwsStateError,
+    );
+  });
 }

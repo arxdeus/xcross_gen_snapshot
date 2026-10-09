@@ -3,12 +3,15 @@ import 'dart:io';
 
 import 'package:archive/archive.dart' show ZipDecoder;
 import 'package:args/args.dart';
+import 'package:path/path.dart' as p;
 import 'package:xcross_gen_snapshot/xcross_gen_snapshot.dart';
 
 const usage =
     'dart run xcross_gen_snapshot:verify '
-    '(--compiler <gen_snapshot> --dill <app.dill> | --flutter-log <log>) '
-    '[--work <dir>] [--expect <sha256>] [--json <file>]';
+    '((--compiler <gen_snapshot> | --compiler-zip <zip> [--manifest <json>]) '
+    '--dill <app.dill> | --flutter-log <log>) '
+    '[--work <dir>] [--expect <sha256> | --expect-json <file>] '
+    '[--json <file>]';
 
 /// Compiles an app.dill with a gen_snapshot using Flutter's iOS flags and
 /// fixed relative output names, prints the sha256 of the App binary and
@@ -28,6 +31,16 @@ Future<void> main(List<String> args) async {
     ..addOption(
       'compiler-zip',
       help: 'A release zip; its gen_snapshot[.exe] is extracted and run',
+    )
+    ..addOption(
+      'manifest',
+      help:
+          'A published manifest.json; the --compiler-zip (by file name) and '
+          'its executable must match the sha256 and size it records',
+    )
+    ..addOption(
+      'flutter',
+      help: 'With --manifest: the Flutter version the manifest must be for',
     )
     ..addOption('expect', help: 'Required sha256 of App')
     ..addOption(
@@ -59,15 +72,33 @@ Future<void> main(List<String> args) async {
     log('flutter used ${invocation.compiler} on ${invocation.dill}');
   }
   final zip = options.option('compiler-zip');
+  final manifestPath = options.option('manifest');
+  if (manifestPath != null && zip == null) {
+    stderr.writeln('--manifest needs --compiler-zip\n$usage');
+    exit(64);
+  }
+  Map<String, Object?>? asset;
   if (zip != null) {
     final dir = Directory('${options.option('work')}-compiler').absolute;
     if (dir.existsSync()) dir.deleteSync(recursive: true);
-    final archive = ZipDecoder().decodeBytes(File(zip).readAsBytesSync());
-    await makeExecutable(extractEntries(archive, dir.path));
+    final bytes = File(zip).readAsBytesSync();
     final host = Host.current();
-    final info = AssetInfo.inspect(File(zip).readAsBytesSync(), host);
+    final info = AssetInfo.inspect(bytes, host);
+    if (manifestPath != null) {
+      checkAssetAgainstManifest(
+        jsonDecode(File(manifestPath).readAsStringSync())
+            as Map<String, Object?>,
+        asset: p.basename(zip),
+        info: info,
+        flutter: options.option('flutter'),
+      );
+      log('${p.basename(zip)} matches $manifestPath (sha256 ${info.sha256})');
+    }
+    final archive = ZipDecoder().decodeBytes(bytes);
+    await makeExecutable(extractEntries(archive, dir.path));
     compiler = File('${dir.path}/${host.executableName}').path;
     log('extracted $compiler (sha256 ${info.executableSha256})');
+    asset = {'name': p.basename(zip), ...info.toJson()};
   }
   if (compiler == null || dill == null) {
     stderr.writeln('missing --compiler/--dill\n$usage');
@@ -86,6 +117,7 @@ Future<void> main(List<String> args) async {
   final json = {
     'compiler': compiler,
     'compiler_sha256': await sha256File(File(compiler)),
+    'compiler_zip': ?asset,
     'dill_sha256': await sha256File(File(dill)),
     ...result.toJson(),
     // The macOS reference (official.json) and every host check record the

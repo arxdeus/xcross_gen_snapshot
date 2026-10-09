@@ -257,3 +257,37 @@ void checkVerifications(
     }
   }
 }
+
+/// Checks a downloaded compiler zip ([info] of asset [asset]) against a
+/// published `manifest.json`: the zip and the executable inside it must have
+/// the recorded sha256 and size, and the manifest must belong to [flutter]
+/// (when given). Throws a [StateError] naming the first mismatch.
+void checkAssetAgainstManifest(
+  Map<String, Object?> manifest, {
+  required String asset,
+  required AssetInfo info,
+  String? flutter,
+}) {
+  if (manifest['schema'] != 1) {
+    throw StateError('unsupported manifest schema ${manifest['schema']}');
+  }
+  if (flutter != null && manifest['flutter'] != flutter) {
+    throw StateError(
+      'manifest is for Flutter ${manifest['flutter']}, expected $flutter',
+    );
+  }
+  final assets = manifest['assets'];
+  final entry = assets is Map ? assets[asset] : null;
+  if (entry is! Map) throw StateError('manifest does not list $asset');
+  void same(String key, Object actual) {
+    if (entry[key] != actual) {
+      throw StateError(
+        '$asset: $key is $actual, the manifest records ${entry[key]}',
+      );
+    }
+  }
+
+  same('sha256', info.sha256);
+  same('executable_sha256', info.executableSha256);
+  same('size', info.size);
+}
