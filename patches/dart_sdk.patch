@@ -40,14 +40,49 @@ index 8d73b410..fb0299b3 100644
  template <typename T, typename B, typename Allocator>
 diff --git a/runtime/platform/xcross_apple_sort.h b/runtime/platform/xcross_apple_sort.h
 new file mode 100644
-index 00000000..f9c018fb
+index 00000000..fe852b11
 --- /dev/null
 +++ b/runtime/platform/xcross_apple_sort.h
-@@ -0,0 +1,302 @@
-+// Copyright (c) 1992, 1993 The Regents of the University of California.
-+// All rights reserved. BSD-3-Clause.
-+// Algorithm of Apple Libc stdlib/FreeBSD/qsort.c and heapsort.c, so every
-+// host orders equal elements the same way the macOS libc does.
+@@ -0,0 +1,340 @@
++// Port of the qsort and heapsort algorithms of Apple Libc
++// (stdlib/FreeBSD/qsort.c and stdlib/FreeBSD/heapsort.c), so every host
++// orders equal elements the same way the macOS libc does. See also
++// licenses/LICENSE.apple-libc-qsort in xcross_gen_snapshot.
++//
++// qsort.c:
++//   Copyright (c) 1992, 1993
++//      The Regents of the University of California.  All rights reserved.
++//
++// heapsort.c:
++//   Copyright (c) 1991, 1993
++//      The Regents of the University of California.  All rights reserved.
++//
++//   This code is derived from software contributed to Berkeley by
++//   Ronnie Kon at Mindcraft Inc., Kevin Lew and Elmer Yglesias.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions
++// are met:
++// 1. Redistributions of source code must retain the above copyright
++//    notice, this list of conditions and the following disclaimer.
++// 2. Redistributions in binary form must reproduce the above copyright
++//    notice, this list of conditions and the following disclaimer in the
++//    documentation and/or other materials provided with the distribution.
++// 3. Neither the name of the University nor the names of its contributors
++//    may be used to endorse or promote products derived from this software
++//    without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
++// ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++// ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
++// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
++// OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++// HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++// LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++// OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
++// SUCH DAMAGE.
 +
 +#ifndef RUNTIME_PLATFORM_XCROSS_APPLE_SORT_H_
 +#define RUNTIME_PLATFORM_XCROSS_APPLE_SORT_H_
@@ -55,6 +90,7 @@ index 00000000..f9c018fb
 +#include <stddef.h>
 +#include <stdint.h>
 +#include <stdlib.h>
++#include <string.h>
 +
 +namespace dart {
 +namespace xcross_sort {
@@ -70,17 +106,23 @@ index 00000000..f9c018fb
 +  return r;
 +}
 +
-+#define XCROSS_SWAPCODE(TYPE, parmi, parmj, n)                                 \
-+  {                                                                            \
-+    size_t i = (n) / sizeof(TYPE);                                             \
-+    TYPE* pi = reinterpret_cast<TYPE*>(parmi);                                 \
-+    TYPE* pj = reinterpret_cast<TYPE*>(parmj);                                 \
-+    do {                                                                       \
-+      TYPE t = *pi;                                                            \
-+      *pi++ = *pj;                                                             \
-+      *pj++ = t;                                                               \
-+    } while (--i > 0);                                                         \
-+  }
++// Swaps n bytes at pi and pj in units of TYPE. The units are copied
++// through locals with memcpy (no type-punned lvalues), which compilers
++// lower to plain loads and stores.
++template <typename TYPE>
++inline void SwapCode(char* pi, char* pj, size_t n) {
++  size_t i = n / sizeof(TYPE);
++  do {
++    TYPE ti;
++    TYPE tj;
++    memcpy(&ti, pi, sizeof(TYPE));
++    memcpy(&tj, pj, sizeof(TYPE));
++    memcpy(pi, &tj, sizeof(TYPE));
++    memcpy(pj, &ti, sizeof(TYPE));
++    pi += sizeof(TYPE);
++    pj += sizeof(TYPE);
++  } while (--i > 0);
++}
 +
 +inline int SwapType(const void* a, size_t es, size_t size) {
 +  return (reinterpret_cast<uintptr_t>(a) % size != 0 || es % size != 0)
@@ -93,12 +135,13 @@ index 00000000..f9c018fb
 +                     size_t n,
 +                     int swaptype_long,
 +                     int swaptype_int) {
-+  if (swaptype_long <= 1)
-+    XCROSS_SWAPCODE(int64_t, a, b, n)
-+  else if (swaptype_int <= 1)
-+    XCROSS_SWAPCODE(int32_t, a, b, n)
-+  else
-+    XCROSS_SWAPCODE(char, a, b, n)
++  if (swaptype_long <= 1) {
++    SwapCode<int64_t>(a, b, n);
++  } else if (swaptype_int <= 1) {
++    SwapCode<int32_t>(a, b, n);
++  } else {
++    SwapCode<char>(a, b, n);
++  }
 +}
 +
 +inline void Swap(char* a,
@@ -107,13 +150,9 @@ index 00000000..f9c018fb
 +                 int swaptype_long,
 +                 int swaptype_int) {
 +  if (swaptype_long == 0) {
-+    int64_t t = *reinterpret_cast<int64_t*>(a);
-+    *reinterpret_cast<int64_t*>(a) = *reinterpret_cast<int64_t*>(b);
-+    *reinterpret_cast<int64_t*>(b) = t;
++    SwapCode<int64_t>(a, b, sizeof(int64_t));
 +  } else if (swaptype_int == 0) {
-+    int32_t t = *reinterpret_cast<int32_t*>(a);
-+    *reinterpret_cast<int32_t*>(a) = *reinterpret_cast<int32_t*>(b);
-+    *reinterpret_cast<int32_t*>(b) = t;
++    SwapCode<int32_t>(a, b, sizeof(int32_t));
 +  } else {
 +    SwapFunc(a, b, es, swaptype_long, swaptype_int);
 +  }
@@ -340,7 +379,6 @@ index 00000000..f9c018fb
 +#undef XCROSS_HCREATE
 +#undef XCROSS_HCOPY
 +#undef XCROSS_HSWAP
-+#undef XCROSS_SWAPCODE
 +
 +}  // namespace xcross_sort
 +}  // namespace dart
