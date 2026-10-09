@@ -4,7 +4,9 @@ name: gen_snapshot
 # gen_snapshot of that version's engine for every host and mode, proves each
 # one byte-identical to Flutter's official macOS compiler, and publishes the
 # GitHub release of that tag (docs/CONTRACT.md). workflow_dispatch does the
-# same without publishing.
+# same without publishing, unless `replace_release` is set: that is the only
+# way to overwrite a release that is already published with a different
+# manifest (tool/publish_release.sh).
 
 on:
   push:
@@ -14,16 +16,28 @@ on:
   workflow_dispatch:
     inputs:
       flutter:
-        description: Flutter version to build and verify (no release is published)
+        description: Flutter version to build and verify
         required: true
         type: string
+      replace_release:
+        description: >-
+          Publish to the existing tag's release, overwriting its assets even
+          if it is already published with a different manifest (main only)
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: gen-snapshot-${{ github.ref_type == 'tag' && github.ref_name || inputs.flutter || github.ref }}
-  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+  # Publishing runs of one version queue behind each other and are never
+  # cancelled; verification runs of a ref and version supersede each other.
+  group: >-
+    gen-snapshot-${{ (github.ref_type == 'tag' || inputs.replace_release)
+    && format('publish-{0}', github.ref_type == 'tag' && github.ref_name || inputs.flutter)
+    || format('{0}-{1}', github.ref, inputs.flutter) }}
+  cancel-in-progress: ${{ !(github.ref_type == 'tag' || inputs.replace_release) }}
 
 env:
   DART_VERSION: '3.13.5'
@@ -33,18 +47,21 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       build: ${{ steps.resolve.outputs.build }}
+      publishing: ${{ steps.resolve.outputs.publishing }}
       flutter: ${{ steps.resolve.outputs.flutter }}
       engine: ${{ steps.resolve.outputs.engine }}
       dart: ${{ steps.resolve.outputs.dart }}
       deps_key: ${{ steps.resolve.outputs.deps_key }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dart-lang/setup-dart@v1
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
         with:
           sdk: ${{ env.DART_VERSION }}
       - name: Test the build tooling
         run: |
-          dart pub get
+          dart pub get --enforce-lockfile
           dart format --output=none --set-exit-if-changed lib bin test
           dart analyze --fatal-infos
           dart test
@@ -52,12 +69,23 @@ jobs:
         id: resolve
         env:
           FLUTTER_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.flutter }}
+          REPLACE: ${{ inputs.replace_release == true }}
         run: |
           if [ -z "$FLUTTER_VERSION" ]; then
             echo "build=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          publishing=false
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            publishing=true
+          elif [ "$REPLACE" = true ]; then
+            if [ "$GITHUB_REF" != refs/heads/main ]; then
+              echo "::error::replace_release is only allowed from main"; exit 1
+            fi
+            publishing=true
+          fi
           echo "build=true" >> "$GITHUB_OUTPUT"
+          echo "publishing=$publishing" >> "$GITHUB_OUTPUT"
           dart run xcross_gen_snapshot:resolve --flutter "$FLUTTER_VERSION" \
             --github-output "$GITHUB_OUTPUT" | tee resolve.json
 
@@ -70,14 +98,16 @@ jobs:
       FLUTTER_VERSION: ${{ needs.resolve.outputs.flutter }}
       ENGINE: ${{ needs.resolve.outputs.engine }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dart-lang/setup-dart@v1
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
         with:
           sdk: ${{ env.DART_VERSION }}
-      - run: dart pub get
+      - run: dart pub get --enforce-lockfile
       - name: Install Flutter ${{ env.FLUTTER_VERSION }}
         run: |
-          for i in 1 2 3; do
+          for _ in 1 2 3; do
             git clone --depth 1 -b "$FLUTTER_VERSION" \
               https://github.com/flutter/flutter "$RUNNER_TEMP/flutter" && break
             rm -rf "$RUNNER_TEMP/flutter"; sleep 20
@@ -91,7 +121,7 @@ jobs:
         run: |
           flutter config --no-analytics
           flutter --version
-          for i in 1 2 3; do flutter precache --ios && break; sleep 20; done
+          for _ in 1 2 3; do flutter precache --ios && break; sleep 20; done
       - name: Build the reference app
         run: |
           cd "$RUNNER_TEMP"
@@ -102,6 +132,8 @@ jobs:
               || { tail -100 "$RUNNER_TEMP/build-$mode.log"; exit 1; }
             # Take the dill and compiler flutter actually used, and recompile it
             # with the official compiler using fixed relative output names.
+            # official.json records the runner image and macOS version (the
+            # libc qsort the sort patch reproduces comes from it).
             (cd "$GITHUB_WORKSPACE" && dart run xcross_gen_snapshot:verify \
               --flutter-log "$RUNNER_TEMP/build-$mode.log" \
               --copy-dill "$GITHUB_WORKSPACE/reference/$mode/app.dill" \
@@ -110,7 +142,7 @@ jobs:
             cp "$RUNNER_TEMP/build-$mode.log" "$GITHUB_WORKSPACE/reference/$mode/"
           done
           cat "$GITHUB_WORKSPACE"/reference/*/official.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: reference
           path: reference/
@@ -136,34 +168,59 @@ jobs:
         shell: bash
     env:
       FLUTTER_VERSION: ${{ needs.resolve.outputs.flutter }}
+      PUBLISHING: ${{ needs.resolve.outputs.publishing }}
+      CACHE_KEY: xgs-${{ matrix.host }}-${{ needs.resolve.outputs.deps_key }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dart-lang/setup-dart@v1
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
         with:
           sdk: ${{ env.DART_VERSION }}
-      - run: dart pub get
+      - run: dart pub get --enforce-lockfile
+      # Publishing builds restore the cache too, but only for the CIPD zips
+      # (sha256-checked against their content address); they download the
+      # git deps again (--fresh-git-deps): cached gitiles tarballs are only
+      # known by file name. The cache is saved only by verification runs of
+      # main (workflow_dispatch), never by tag or pull request runs.
       - name: Restore downloads
-        uses: actions/cache@v4
+        id: cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: xgs-cache
-          key: xgs-${{ matrix.host }}-${{ needs.resolve.outputs.deps_key }}
+          key: ${{ env.CACHE_KEY }}
       - name: Build gen_snapshot
         run: |
           # Short work dir on Windows: object paths under the Dart tree get
           # close to MAX_PATH otherwise.
           work=xgs; [ "$RUNNER_OS" = Windows ] && work=C:/xgs
+          fresh=(); [ "$PUBLISHING" = true ] && fresh=(--fresh-git-deps)
           dart run xcross_gen_snapshot:build \
             --engine "${{ needs.resolve.outputs.engine }}" \
             --dart "${{ needs.resolve.outputs.dart }}" \
             --mode "${{ matrix.mode }}" \
-            --work "$work" --cache xgs-cache --out out
+            --work "$work" --cache xgs-cache --out out "${fresh[@]}"
           cat out/build.json
+      - name: Save downloads
+        if: >-
+          steps.cache.outputs.cache-hit != 'true'
+          && needs.resolve.outputs.publishing != 'true'
+          && github.event_name == 'workflow_dispatch'
+          && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: xgs-cache
+          key: ${{ env.CACHE_KEY }}
       - name: Package
-        run: dart run xcross_gen_snapshot:pack --dir out --mode "${{ matrix.mode }}" --out-dir dist
-      - uses: actions/upload-artifact@v4
+        run: |
+          dart run xcross_gen_snapshot:pack --dir out --mode "${{ matrix.mode }}" --out-dir dist
+          cp out/build.json "dist/build-${{ matrix.mode }}-${{ matrix.host }}.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gen_snapshot-${{ matrix.mode }}-${{ matrix.host }}
-          path: dist/gen_snapshot-${{ matrix.mode }}-${{ matrix.host }}.zip
+          path: |
+            dist/gen_snapshot-${{ matrix.mode }}-${{ matrix.host }}.zip
+            dist/build-${{ matrix.mode }}-${{ matrix.host }}.json
           retention-days: 30
           compression-level: 0
 
@@ -185,16 +242,18 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: dart-lang/setup-dart@v1
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
         with:
           sdk: ${{ env.DART_VERSION }}
-      - run: dart pub get
-      - uses: actions/download-artifact@v4
+      - run: dart pub get --enforce-lockfile
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: reference
           path: reference
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: gen_snapshot-${{ matrix.mode }}-${{ matrix.host }}
           path: dist
@@ -206,13 +265,13 @@ jobs:
             --work "$RUNNER_TEMP/verify" \
             --json "verification-${{ matrix.mode }}-${{ matrix.host }}.json" \
             --expect-json reference/${{ matrix.mode }}/official.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: verification-${{ matrix.mode }}-${{ matrix.host }}
           path: verification-${{ matrix.mode }}-${{ matrix.host }}.json
           if-no-files-found: ignore
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: mismatch-${{ matrix.mode }}-${{ matrix.host }}
@@ -224,23 +283,26 @@ jobs:
 
   publish:
     needs: [resolve, verify]
-    if: github.ref_type == 'tag'
+    if: needs.resolve.outputs.publishing == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     env:
-      GH_TOKEN: ${{ github.token }}
-      TAG: ${{ github.ref_name }}
+      TAG: ${{ needs.resolve.outputs.flutter }}
       FLUTTER_VERSION: ${{ needs.resolve.outputs.flutter }}
       ENGINE: ${{ needs.resolve.outputs.engine }}
       DART_REV: ${{ needs.resolve.outputs.dart }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dart-lang/setup-dart@v1
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
         with:
           sdk: ${{ env.DART_VERSION }}
-      - run: dart pub get
-      - uses: actions/download-artifact@v4
+      - run: dart pub get --enforce-lockfile
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
       - name: Write manifest.json
@@ -250,40 +312,25 @@ jobs:
           ls -la dist
           release=$(jq -r .app_sha256 artifacts/reference/release/official.json)
           profile=$(jq -r .app_sha256 artifacts/reference/profile/official.json)
-          # Every host build reproduced these (the verify jobs enforce it;
-          # double-check before publishing).
-          for mode in release profile; do
-            want=$(jq -r .app_sha256 artifacts/reference/$mode/official.json)
-            for host in linux-x64 linux-arm64 windows-x64 windows-arm64; do
-              got=$(jq -r .app_sha256 artifacts/verification-$mode-$host/verification-$mode-$host.json)
-              echo "$mode $host official=$want built=$got"
-              [ "$got" = "$want" ] || { echo "::error::$mode $host is not byte-identical"; exit 1; }
-            done
-          done
+          # --verifications: every verify job must have run exactly the
+          # executable of the zip being published (compiler_sha256 ==
+          # executable_sha256) and produced the official App of its mode.
           dart run xcross_gen_snapshot:manifest \
             --flutter "$FLUTTER_VERSION" --engine "$ENGINE" --dart "$DART_REV" \
             --assets dist --release-app-sha256 "$release" --profile-app-sha256 "$profile" \
+            --verifications artifacts \
             --out dist/manifest.json
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            dist/gen_snapshot-*.zip
+            dist/manifest.json
       - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPLACE: ${{ github.event_name == 'workflow_dispatch' && inputs.replace_release == true }}
         run: |
-          set -euo pipefail
-          title="Flutter $FLUTTER_VERSION (engine ${ENGINE:0:8})"
-          notes="iOS arm64 gen_snapshot of Flutter $FLUTTER_VERSION (engine $ENGINE, Dart $DART_REV) for linux-x64, linux-arm64, windows-x64 and windows-arm64, release and profile. Every compiler produced an App binary byte-identical to Flutter's official macOS compiler on the default \`flutter create\` app (sha256 in manifest.json)."
-          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep $((i * 10)); done; return 1; }
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            if retry gh release download "$TAG" -p manifest.json -O published.json --clobber \
-               && cmp -s published.json dist/manifest.json; then
-              echo "Release $TAG already has this exact manifest, nothing to do."
-              exit 0
-            fi
-            echo "Updating release $TAG"
-            retry gh release edit "$TAG" --title "$title" --notes "$notes"
-            retry gh release upload "$TAG" dist/gen_snapshot-*.zip --clobber
-            retry gh release upload "$TAG" dist/manifest.json --clobber
-          else
-            retry gh release create "$TAG" --verify-tag --draft --title "$title" --notes "$notes" \
-              dist/gen_snapshot-*.zip
-            retry gh release upload "$TAG" dist/manifest.json --clobber
-            retry gh release edit "$TAG" --draft=false
-          fi
-          gh release view "$TAG"
+          export TITLE="Flutter $FLUTTER_VERSION (engine ${ENGINE:0:8})"
+          export NOTES="iOS arm64 gen_snapshot of Flutter $FLUTTER_VERSION (engine $ENGINE, Dart $DART_REV) for linux-x64, linux-arm64, windows-x64 and windows-arm64, release and profile. Every compiler produced an App binary byte-identical to Flutter's official macOS compiler on the default \`flutter create\` app (sha256 in manifest.json). Build provenance: \`gh attestation verify <file> -R $GITHUB_REPOSITORY\`."
+          tool/publish_release.sh
