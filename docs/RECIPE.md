@@ -23,7 +23,7 @@
 ## Patch
 `dart_sdk.patch` (7 files, applies with `git apply` to a sparse checkout at the Dart revision of every Flutter 3.47.0-3.47.6):
 - runtime/runtime_args.gni: `dart_xcross_target_os_ios = false` declared arg.
-- runtime/BUILD.gn: `dart_os_config` emits DART_TARGET_OS_MACOS + DART_TARGET_OS_MACOS_IOS when the arg is true, while target_os stays the host OS (host toolchain builds gen_snapshot, no Xcode/iOS SDK lookup).
+- runtime/BUILD.gn: `dart_os_config` emits DART_TARGET_OS_MACOS + DART_TARGET_OS_MACOS_IOS when the arg is true, while target_os stays the host OS (host toolchain builds gen_snapshot, no Xcode/iOS SDK lookup). With the arg set, `dart_maybe_product_config` and `dart_product_config` no longer add DART_DISABLE_TIMELINE for `target_os == "linux"` release builds: Dart drops timeline support from Linux product VMs, and in the compiler that folds `Timeline.isDartStreamEnabled` to `false` (the `kTimeline_isDartStreamEnabled` intrinsic in kernel_to_il.cc), so a Linux-hosted release compiler strips `Timeline.startSync` and its helpers from apps that call them, while the official macOS compiler keeps them for the device.
 - runtime/platform/xcross_apple_sort.h (new) + runtime/platform/growable_array.h (Sort uses it).
 - runtime/vm/compiler/frontend/kernel_to_il.cc, flow_graph_builder.cc, kernel_binary_flowgraph.cc: argument evaluation order made explicit (see "Windows: argument evaluation order" below).
 

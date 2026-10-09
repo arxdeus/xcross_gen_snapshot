@@ -1,8 +1,27 @@
 diff --git a/runtime/BUILD.gn b/runtime/BUILD.gn
-index 5c3eb760..4ed1a9e4 100644
+index 5c3eb76..bc24949 100644
 --- a/runtime/BUILD.gn
 +++ b/runtime/BUILD.gn
-@@ -110,7 +110,12 @@ config("dart_precompiler_config") {
+@@ -31,7 +31,7 @@ config("dart_maybe_product_config") {
+     }
+     assert(!dart_debug)
+     defines += [ "PRODUCT" ]
+-    if (target_os == "linux") {
++    if (target_os == "linux" && !dart_xcross_target_os_ios) {
+       defines += [ "DART_DISABLE_TIMELINE" ]
+     }
+   }
+@@ -44,7 +44,8 @@ config("dart_product_config") {
+   cflags = []
+   if (!dart_debug) {
+     defines += [ "PRODUCT" ]
+-    if (dart_runtime_mode == "release" && target_os == "linux") {
++    if (dart_runtime_mode == "release" && target_os == "linux" &&
++        !dart_xcross_target_os_ios) {
+       defines += [ "DART_DISABLE_TIMELINE" ]
+     }
+   }
+@@ -110,7 +111,12 @@ config("dart_precompiler_config") {
  config("dart_os_config") {
    defines = []
  
@@ -385,7 +404,7 @@ index 00000000..fe852b11
 +
 +#endif  // RUNTIME_PLATFORM_XCROSS_APPLE_SORT_H_
 diff --git a/runtime/runtime_args.gni b/runtime/runtime_args.gni
-index d465b34f..ea4979e7 100644
+index d465b34..ea4979e 100644
 --- a/runtime/runtime_args.gni
 +++ b/runtime/runtime_args.gni
 @@ -3,6 +3,8 @@
