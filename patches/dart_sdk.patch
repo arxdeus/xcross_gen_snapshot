@@ -11,10 +11,7 @@ index 5c3eb76..bc24949 100644
        defines += [ "DART_DISABLE_TIMELINE" ]
      }
    }
-@@ -44,7 +44,8 @@ config("dart_product_config") {
-   cflags = []
-   if (!dart_debug) {
-     defines += [ "PRODUCT" ]
+@@ -47,4 +47,5 @@ config("dart_product_config") {
 -    if (dart_runtime_mode == "release" && target_os == "linux") {
 +    if (dart_runtime_mode == "release" && target_os == "linux" &&
 +        !dart_xcross_target_os_ios) {

@@ -1,7 +1,10 @@
 # xcross_gen_snapshot: build recipe (verified)
 
 ## Verified facts
-- Flutter 3.47.* tags -> engine, Dart revision (from flutter/flutter bin/internal/engine.version and DEPS `dart_revision`):
+- Flutter 3.44.* and 3.47.* tags -> engine, Dart revision (from flutter/flutter bin/internal/engine.version and DEPS `dart_revision`):
+  - 3.44.0 engine 4c525dac5ebe5971c5708ef73558ed8edcf4a362 dart 98116461144f4429ab873f8497023a5ec3b08127 (Dart 3.12.0)
+  - 3.44.1 engine c416acfeb8126e097f758c664aaa3da929e27da0 dart fc3da898ea1664b8a8633f6ec03d2c2290bb3d01
+  - 3.44.2-3.44.9 dart d684a576a6aa954ae107a03b2b4e1d61c3bebe93 (Dart 3.12.2), engines 77e2e947 (3.44.2), a4ce257c (3.44.3), a10d8ac3 (3.44.4), 83675ed2 (3.44.5, 3.44.6), 69c8c617 (3.44.7), 0cd61071 (3.44.8), 5a2a6a42 (3.44.9)
   - 3.47.0 engine 5f77625673248ee5846fbcaf5d3e1a3878386fd7 dart da6595cd6bb5d4c0a185d759a025e879ff06e631
   - 3.47.1 engine 5d531788691ec3404cac0cee66ead4007b177363 dart 852b3e3608906afbe6102573cfd4407aeedd1b78
   - 3.47.2 engine a804b261645ef8c13eb3d5c44a5c2fb0340c5539 dart 60a57cd42d64dc03e9f07aa60a2e250755c1ef28
@@ -21,7 +24,7 @@
 - Without the sort patch a glibc-hosted compiler produces a valid but different snapshot (3.3M bytes differ): libc qsort tie order. The reference is the libc `qsort` of the `macos-15` GitHub runner that runs Flutter's official compiler in CI (its image and macOS version are recorded in `official.json`). The patch ports Apple Libc stdlib/FreeBSD/qsort.c + heapsort.c (BSD-3, full notice in the header and in licenses/LICENSE.apple-libc-qsort) into runtime/platform/xcross_apple_sort.h and makes GrowableArray::Sort use it. The heapsort fallback is hit in 37,653 of 45,871 calls, so heapsort must be ported exactly. Element swaps go through `memcpy` into local `int64_t`/`int32_t`/`char` (no type-punned lvalues); the port matches the macOS libc `qsort` on randomized inputs (element sizes 1-40, misaligned bases, `-O0`/`-O2`).
 
 ## Patch
-`dart_sdk.patch` (7 files, applies with `git apply` to a sparse checkout at the Dart revision of every Flutter 3.47.0-3.47.6):
+`dart_sdk.patch` (7 files, applies with `git apply` to a sparse checkout at the Dart revision of every Flutter 3.44.0-3.44.9 and 3.47.0-3.47.6). The `dart_product_config` hunk only anchors on its condition and the lines after it: Dart 3.12 (Flutter 3.44) still has an `if (is_posix) { cflags = [ "-fvisibility=hidden" ] }` block above it that Dart 3.13 dropped. Check new versions with `git apply --check`:
 - runtime/runtime_args.gni: `dart_xcross_target_os_ios = false` declared arg.
 - runtime/BUILD.gn: `dart_os_config` emits DART_TARGET_OS_MACOS + DART_TARGET_OS_MACOS_IOS when the arg is true, while target_os stays the host OS (host toolchain builds gen_snapshot, no Xcode/iOS SDK lookup). With the arg set, `dart_maybe_product_config` and `dart_product_config` no longer add DART_DISABLE_TIMELINE for `target_os == "linux"` release builds: Dart drops timeline support from Linux product VMs, and in the compiler that folds `Timeline.isDartStreamEnabled` to `false` (the `kTimeline_isDartStreamEnabled` intrinsic in kernel_to_il.cc), so a Linux-hosted release compiler strips `Timeline.startSync` and its helpers from apps that call them, while the official macOS compiler keeps them for the device.
 - runtime/platform/xcross_apple_sort.h (new) + runtime/platform/growable_array.h (Sort uses it).
@@ -76,7 +79,8 @@ dart_xcross_target_os_ios = true
 
 ## Reference outputs for CI byte checks
 - Build a reference Flutter app with stock `flutter build ios --release` / `--profile` on macOS for the same Flutter version (macOS runner), take its `.dart_tool/flutter_build/*/app.dill` and run the OFFICIAL engine gen_snapshot (from that engine's ios-release/ios-profile artifacts) with the flags below, then run each host's built compiler on the same app.dill and compare App byte-for-byte:
-  `--deterministic --snapshot_kind=app-aot-macho-dylib --macho=App --macho-object=app.o --macho-min-os-version=15.0 --macho-rpath=@executable_path/Frameworks,@loader_path/Frameworks --macho-install-name=@rpath/App.framework/App app.dill`
+  `--deterministic --snapshot_kind=app-aot-macho-dylib --macho=App --macho-object=app.o --macho-min-os-version=<floor> --macho-rpath=@executable_path/Frameworks,@loader_path/Frameworks --macho-install-name=@rpath/App.framework/App app.dill`
+  `<floor>` is the iOS deployment floor flutter_tools passes for that Flutter version (15.0 in 3.47, 13.0 in 3.44). `verify --flutter-log` takes it from the build log and records it as `min_os_version` in official.json; `verify --expect-json` compiles with the one recorded there.
 
 ## Windows: argument evaluation order (verified)
 - MSVC-ABI compilers (clang-cl included) evaluate function arguments right to left; clang on macOS/Linux evaluates them left to right. Where the Dart IL builder hands two counter-advancing calls to one function, a Windows-hosted compiler numbers deopt ids differently. The suspend point's yield index is its deopt id, so `PcDescriptors` of async functions differed (found by mapping the differing `__const` bytes to objects with `--write-v8-snapshot-profile-to`).
