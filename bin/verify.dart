@@ -11,7 +11,7 @@ const usage =
     '((--compiler <gen_snapshot> | --compiler-zip <zip> [--manifest <json>]) '
     '--dill <app.dill> | --flutter-log <log>) '
     '[--work <dir>] [--expect <sha256> | --expect-json <file>] '
-    '[--json <file>]';
+    '[--min-os-version <version>] [--json <file>]';
 
 /// Compiles an app.dill with a gen_snapshot using Flutter's iOS flags and
 /// fixed relative output names, prints the sha256 of the App binary and
@@ -50,6 +50,13 @@ Future<void> main(List<String> args) async {
           'output of --json on the reference run)',
     )
     ..addOption('json', help: 'Write the result as JSON to this file')
+    ..addOption(
+      'min-os-version',
+      help:
+          '--macho-min-os-version to compile with (Flutter\'s iOS deployment '
+          'floor). Default: the one of --flutter-log, else the one recorded '
+          'in --expect-json, else $defaultMinOsVersion',
+    )
     ..addFlag('help', abbr: 'h', negatable: false);
   final ArgResults options;
   try {
@@ -64,13 +71,43 @@ Future<void> main(List<String> args) async {
   }
   var compiler = options.option('compiler');
   var dill = options.option('dill');
+  final expectJson = options.option('expect-json');
+  final reference = expectJson == null
+      ? null
+      : SnapshotResult.fromJson(
+          jsonDecode(File(expectJson).readAsStringSync())
+              as Map<String, Object?>,
+        );
+  var minOsVersion = options.option('min-os-version');
   final logPath = options.option('flutter-log');
   if (logPath != null) {
     final invocation = parseFlutterBuildLog(File(logPath).readAsStringSync());
     compiler ??= invocation.compiler;
     dill ??= invocation.dill;
-    log('flutter used ${invocation.compiler} on ${invocation.dill}');
+    if (minOsVersion != null && minOsVersion != invocation.minOsVersion) {
+      stderr.writeln(
+        '--min-os-version $minOsVersion, but flutter used '
+        '${invocation.minOsVersion}',
+      );
+      exit(64);
+    }
+    minOsVersion = invocation.minOsVersion;
+    log(
+      'flutter used ${invocation.compiler} on ${invocation.dill} '
+      '(min OS ${invocation.minOsVersion})',
+    );
   }
+  if (reference != null) {
+    if (minOsVersion != null && minOsVersion != reference.minOsVersion) {
+      stderr.writeln(
+        'min OS version $minOsVersion, but the reference $expectJson was '
+        'compiled with ${reference.minOsVersion}',
+      );
+      exit(64);
+    }
+    minOsVersion = reference.minOsVersion;
+  }
+  minOsVersion ??= defaultMinOsVersion;
   final zip = options.option('compiler-zip');
   final manifestPath = options.option('manifest');
   if (manifestPath != null && zip == null) {
@@ -113,6 +150,7 @@ Future<void> main(List<String> args) async {
     compiler: File(compiler),
     dill: File(dill),
     workDir: Directory(options.option('work')!).absolute,
+    minOsVersion: minOsVersion,
   );
   final json = {
     'compiler': compiler,
@@ -133,15 +171,7 @@ Future<void> main(List<String> args) async {
       );
   }
   stdout.writeln(result.appSha256);
-  final expectJson = options.option('expect-json');
-  final expected =
-      options.option('expect') ??
-      (expectJson == null
-          ? null
-          : SnapshotResult.fromJson(
-              jsonDecode(File(expectJson).readAsStringSync())
-                  as Map<String, Object?>,
-            ).appSha256);
+  final expected = options.option('expect') ?? reference?.appSha256;
   if (expected != null) {
     if (expected.trim() != result.appSha256) {
       stderr.writeln(
