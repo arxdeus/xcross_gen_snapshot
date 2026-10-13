@@ -46,12 +46,12 @@ for app in "${apps[@]}"; do
       [ -d "$repo/corpus/$app" ] || { echo "unknown corpus app $app" >&2; exit 64; }
       rm -rf "${dir:?}/lib" "${dir:?}/test"
       cp -R "$repo/corpus/$app/." "$dir/"
-      if [ -f "$dir/pubspec.$flutter_minor.lock" ]; then
-        echo "using pubspec.$flutter_minor.lock"
-        mv "$dir/pubspec.$flutter_minor.lock" "$dir/pubspec.lock"
-      fi
       rm -f "$dir"/pubspec.*.lock
-      if [ -f "$dir/pubspec.lock" ]; then
+      if [ -f "$repo/corpus/$app/pubspec.$flutter_minor.lock" ]; then
+        echo "using pubspec.$flutter_minor.lock"
+        cp "$repo/corpus/$app/pubspec.$flutter_minor.lock" "$dir/pubspec.lock"
+      fi
+      if [ -f "$repo/corpus/$app/pubspec.lock" ]; then
         (cd "$dir" && flutter pub get --enforce-lockfile)
       fi
       ;;
