@@ -51,3 +51,9 @@ in the same place (the workflows always use `$RUNNER_TEMP/flutter`).
   (a test checks it is up to date).
 - `flutter analyze` the apps inside a created app (the repository's
   analysis_options exclude `corpus/`).
+- `corpus/pub_heavy/pubspec.lock` is resolved with Flutter 3.47. Flutter
+  versions whose SDK cannot use it get their own
+  `pubspec.<major>.<minor>.lock` (e.g. `pubspec.3.44.lock`: Dart 3.12, and
+  flutter_test pins vector_math 2.2.0), which `tool/build_corpus.sh` uses
+  instead. pubspec.yaml constraints must admit every lockfile; regenerate
+  one by deleting it and running `flutter pub get` with that Flutter version.

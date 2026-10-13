@@ -19,6 +19,13 @@ shift 2
 apps=("$@")
 [ ${#apps[@]} -gt 0 ] || apps=(ref_app api_samples stress pub_heavy)
 flutter_root=$(cd "$(dirname "$(command -v flutter)")/.." && pwd)
+# A corpus app may carry `pubspec.<major>.<minor>.lock` for Flutter versions
+# whose SDK cannot use the default pubspec.lock (older Dart, other pinned
+# flutter_test deps).
+flutter_version=$(flutter --version --machine | sed -n 's/.*"frameworkVersion": *"\([^"]*\)".*/\1/p')
+[ -n "$flutter_version" ] || { echo "cannot read the Flutter version" >&2; exit 1; }
+flutter_minor=$(echo "$flutter_version" | cut -d. -f1-2)
+echo "Flutter $flutter_version"
 
 for app in "${apps[@]}"; do
   echo "::group::create $app"
@@ -39,6 +46,14 @@ for app in "${apps[@]}"; do
       [ -d "$repo/corpus/$app" ] || { echo "unknown corpus app $app" >&2; exit 64; }
       rm -rf "${dir:?}/lib" "${dir:?}/test"
       cp -R "$repo/corpus/$app/." "$dir/"
+      if [ -f "$dir/pubspec.$flutter_minor.lock" ]; then
+        echo "using pubspec.$flutter_minor.lock"
+        mv "$dir/pubspec.$flutter_minor.lock" "$dir/pubspec.lock"
+      fi
+      rm -f "$dir"/pubspec.*.lock
+      if [ -f "$dir/pubspec.lock" ]; then
+        (cd "$dir" && flutter pub get --enforce-lockfile)
+      fi
       ;;
   esac
   echo "::endgroup::"
